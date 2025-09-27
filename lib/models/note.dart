@@ -75,15 +75,20 @@ class Note {
 
     if (diff.inDays == 0) {
       if (diff.inHours == 0) {
-        return 'il y a ${diff.inMinutes} minutes';
+        if (diff.inMinutes <= 1) {
+          return 'À l\'instant';
+        }
+        return '${diff.inMinutes}min';
       }
-      return 'il y a ${diff.inHours}heures';
+      return '${diff.inHours}h';
     } else if (diff.inDays == 1) {
-      return 'Yesterday';
+      return 'Hier';
     } else if (diff.inDays < 7) {
-      return 'il y a ${diff.inDays} jours';
+      return '${diff.inDays}j';
+    } else if (diff.inDays < 30) {
+      return '${(diff.inDays / 7).floor()}sem';
     } else {
-      return '${updatedAt.day}/${updatedAt.month}/${updatedAt.year}';
+      return '${updatedAt.day.toString().padLeft(2, '0')}/${updatedAt.month.toString().padLeft(2, '0')}/${updatedAt.year}';
     }
   }
 
