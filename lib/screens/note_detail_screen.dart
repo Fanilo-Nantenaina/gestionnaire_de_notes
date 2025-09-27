@@ -19,14 +19,14 @@ class _NoteDetailScreenState extends State<NoteDetailScreen> {
   late final TextEditingController _tagController;
 
   bool _isFavorite = false;
-  String _selectedCategory = 'General';
+  String _selectedCategory = 'Général';
   List<String> _tags = [];
   bool _isLoading = false;
 
   bool get _isEditing => widget.note != null;
 
   static const _categories = [
-    'Général', 'Travail', 'Personel', 'Idées', 'Shopping',
+    'Général', 'Travail', 'Personnel', 'Idées', 'Shopping',
     'Voyages', 'Santé', 'Finance', 'Education', 'Projets'
   ];
 
