@@ -77,7 +77,7 @@ class Note {
       if (diff.inHours == 0) {
         return 'il y a ${diff.inMinutes} minutes';
       }
-      return 'il y a ${diff.inHours}h';
+      return 'il y a ${diff.inHours}heures';
     } else if (diff.inDays == 1) {
       return 'Yesterday';
     } else if (diff.inDays < 7) {
