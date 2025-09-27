@@ -75,13 +75,13 @@ class Note {
 
     if (diff.inDays == 0) {
       if (diff.inHours == 0) {
-        return '${diff.inMinutes} min ago';
+        return 'il y a ${diff.inMinutes} minutes';
       }
-      return '${diff.inHours}h ago';
+      return 'il y a ${diff.inHours}h';
     } else if (diff.inDays == 1) {
       return 'Yesterday';
     } else if (diff.inDays < 7) {
-      return '${diff.inDays} days ago';
+      return 'il y a ${diff.inDays} jours';
     } else {
       return '${updatedAt.day}/${updatedAt.month}/${updatedAt.year}';
     }
