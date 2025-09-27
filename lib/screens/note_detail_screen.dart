@@ -26,8 +26,8 @@ class _NoteDetailScreenState extends State<NoteDetailScreen> {
   bool get _isEditing => widget.note != null;
 
   static const _categories = [
-    'General', 'Work', 'Personal', 'Ideas', 'Shopping',
-    'Travel', 'Health', 'Finance', 'Education', 'Projects'
+    'Général', 'Travail', 'Personel', 'Idées', 'Shopping',
+    'Voyages', 'Santé', 'Finance', 'Education', 'Projets'
   ];
 
   @override
