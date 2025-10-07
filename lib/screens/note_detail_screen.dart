@@ -3,11 +3,14 @@ import 'package:provider/provider.dart';
 import '../models/note.dart';
 import '../providers/notes_provider.dart';
 import '../services/pdf_service.dart';
+import 'share_options_screen.dart';
+import '../models/notebook.dart';
 
 class NoteDetailScreen extends StatefulWidget {
   final Note? note;
+  final String? initialCategory;
 
-  const NoteDetailScreen({super.key, this.note});
+  const NoteDetailScreen({super.key, this.note, this.initialCategory});
 
   @override
   State<NoteDetailScreen> createState() => _NoteDetailScreenState();
@@ -22,13 +25,14 @@ class _NoteDetailScreenState extends State<NoteDetailScreen> {
   String _selectedCategory = 'Général';
   List<String> _tags = [];
   bool _isLoading = false;
+  bool _isCategoryLocked = false;
 
   bool get _isEditing => widget.note != null;
 
-  static const _categories = [
-    'Général', 'Travail', 'Personnel', 'Idées', 'Shopping',
-    'Voyages', 'Santé', 'Finance', 'Education', 'Projets'
-  ];
+  static final _categories = Notebook.getDefaultNotebooks()
+      .where((nb) => nb.id != 'all')
+      .map((nb) => nb.name)
+      .toList();
 
   @override
   void initState() {
@@ -39,8 +43,24 @@ class _NoteDetailScreenState extends State<NoteDetailScreen> {
 
     if (widget.note != null) {
       _isFavorite = widget.note!.isFavorite;
-      _selectedCategory = widget.note!.category;
+      final noteCategory = widget.note!.category;
+      if (_categories.contains(noteCategory)) {
+        _selectedCategory = noteCategory;
+      } else {
+        print('[v0] Invalid category detected: $noteCategory, using Général instead');
+        _selectedCategory = 'Général';
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          final updatedNote = widget.note!.copyWith(category: 'Général');
+          context.read<NotesProvider>().updateNote(updatedNote);
+        });
+      }
       _tags = List.from(widget.note!.tags);
+    } else if (widget.initialCategory != null) {
+      final notebook = Notebook.getNotebookById(widget.initialCategory!);
+      if (notebook != null) {
+        _selectedCategory = notebook.name;
+        _isCategoryLocked = true;
+      }
     }
   }
 
@@ -118,6 +138,7 @@ class _NoteDetailScreenState extends State<NoteDetailScreen> {
     final confirm = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         title: const Text('Supprimer la note ?'),
         content: const Text('Cette action est irréversible.'),
         actions: [
@@ -163,6 +184,47 @@ class _NoteDetailScreenState extends State<NoteDetailScreen> {
     }
   }
 
+  PreferredSizeWidget _buildAppBar() {
+    return AppBar(
+      title: Text(widget.note == null ? 'Nouvelle note' : 'Modifier'),
+      backgroundColor: Colors.transparent,
+      elevation: 0,
+      actions: [
+        if (widget.note != null) ...[
+          IconButton(
+            icon: const Icon(Icons.share),
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => ShareOptionsScreen(note: widget.note!),
+                ),
+              );
+            },
+          ),
+          IconButton(
+            icon: const Icon(Icons.delete_outline),
+            onPressed: _deleteNote,
+          ),
+        ],
+        Padding(
+          padding: const EdgeInsets.only(right: 8),
+          child: TextButton.icon(
+            onPressed: _isLoading ? null : _saveNote,
+            icon: _isLoading
+                ? const SizedBox(
+              width: 16,
+              height: 16,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            )
+                : const Icon(Icons.check),
+            label: const Text('Enregistrer'),
+          ),
+        ),
+      ],
+    );
+  }
+
   void _showSnackBar(String message, {bool isError = false}) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
@@ -176,53 +238,30 @@ class _NoteDetailScreenState extends State<NoteDetailScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
     return Scaffold(
-      appBar: AppBar(
-        title: Text(_isEditing ? 'Modifier' : 'Nouvelle note'),
-        elevation: 0,
-        actions: [
-          if (_isEditing) ...[
-            IconButton(
-              onPressed: _isLoading ? null : _exportToPdf,
-              icon: const Icon(Icons.picture_as_pdf_outlined),
-            ),
-            IconButton(
-              onPressed: _isLoading ? null : _deleteNote,
-              icon: const Icon(Icons.delete_outline),
-              style: IconButton.styleFrom(foregroundColor: Colors.red),
-            ),
-          ],
-          Padding(
-            padding: const EdgeInsets.only(right: 8),
-            child: TextButton.icon(
-              onPressed: _isLoading ? null : _saveNote,
-              icon: _isLoading
-                  ? const SizedBox(
-                width: 16,
-                height: 16,
-                child: CircularProgressIndicator(strokeWidth: 2),
-              )
-                  : const Icon(Icons.check),
-              label: Text(_isEditing ? 'Modifier' : 'Créer'),
-            ),
-          ),
-        ],
-      ),
+      backgroundColor: isDark ? const Color(0xFF0A0A0A) : Colors.grey[50],
+      appBar: _buildAppBar(),
       body: SingleChildScrollView(
-        padding: const EdgeInsets.all(24),
+        padding: const EdgeInsets.all(20),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            TextField(
+            TextFormField(
               controller: _titleController,
-              decoration: const InputDecoration(
+              decoration: InputDecoration(
                 labelText: 'Titre',
-                border: OutlineInputBorder(),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                filled: true,
+                fillColor: isDark ? const Color(0xFF1A1A1A) : Colors.white,
               ),
               style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w500),
             ),
 
-            const SizedBox(height: 24),
+            const SizedBox(height: 20),
 
             Row(
               children: [
@@ -230,15 +269,24 @@ class _NoteDetailScreenState extends State<NoteDetailScreen> {
                   flex: 3,
                   child: DropdownButtonFormField<String>(
                     value: _selectedCategory,
-                    decoration: const InputDecoration(
+                    decoration: InputDecoration(
                       labelText: 'Catégorie',
-                      border: OutlineInputBorder(),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      filled: true,
+                      fillColor: isDark ? const Color(0xFF1A1A1A) : Colors.white,
+                      suffixIcon: _isCategoryLocked
+                          ? const Icon(Icons.lock_outline, size: 20)
+                          : null,
                     ),
                     items: _categories.map((cat) => DropdownMenuItem(
                       value: cat,
                       child: Text(cat),
                     )).toList(),
-                    onChanged: (value) => setState(() => _selectedCategory = value!),
+                    onChanged: _isCategoryLocked
+                        ? null
+                        : (value) => setState(() => _selectedCategory = value!),
                   ),
                 ),
                 const SizedBox(width: 16),
@@ -265,46 +313,83 @@ class _NoteDetailScreenState extends State<NoteDetailScreen> {
               ],
             ),
 
-            const SizedBox(height: 24),
+            const SizedBox(height: 20),
 
-            TextField(
+            TextFormField(
               controller: _tagController,
               decoration: InputDecoration(
                 labelText: 'Ajouter un tag',
-                border: const OutlineInputBorder(),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                filled: true,
+                fillColor: isDark ? const Color(0xFF1A1A1A) : Colors.white,
                 suffixIcon: IconButton(
                   onPressed: _addTag,
                   icon: const Icon(Icons.add),
                 ),
               ),
-              onSubmitted: (_) => _addTag(),
+              //onSubmitted: (_) => _addTag(),
             ),
 
             if (_tags.isNotEmpty) ...[
               const SizedBox(height: 12),
               Wrap(
                 spacing: 8,
-                runSpacing: 4,
+                runSpacing: 8,
                 children: _tags.map((tag) => Chip(
                   label: Text(tag, style: const TextStyle(fontSize: 12)),
                   onDeleted: () => _removeTag(tag),
                   deleteIconColor: Colors.grey[600],
+                  backgroundColor: const Color(0xFF6366F1).withOpacity(0.1),
                   materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
                 )).toList(),
               ),
             ],
 
-            const SizedBox(height: 24),
+            const SizedBox(height: 20),
 
-            TextField(
+            TextFormField(
               controller: _contentController,
-              decoration: const InputDecoration(
+              decoration: InputDecoration(
                 labelText: 'Contenu',
-                border: OutlineInputBorder(),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                filled: true,
+                fillColor: isDark ? const Color(0xFF1A1A1A) : Colors.white,
                 alignLabelWithHint: true,
               ),
               maxLines: 12,
               textAlignVertical: TextAlignVertical.top,
+            ),
+
+            const SizedBox(height: 24),
+
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton.icon(
+                onPressed: _isLoading ? null : _saveNote,
+                icon: _isLoading
+                    ? const SizedBox(
+                  width: 20,
+                  height: 20,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                  ),
+                )
+                    : const Icon(Icons.save),
+                label: Text(_isEditing ? 'Mettre à jour' : 'Enregistrer'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF6366F1),
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(vertical: 16),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                ),
+              ),
             ),
           ],
         ),

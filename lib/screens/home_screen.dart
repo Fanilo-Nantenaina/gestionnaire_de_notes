@@ -4,11 +4,19 @@ import 'package:flutter_staggered_grid_view/flutter_staggered_grid_view.dart';
 import '../providers/notes_provider.dart';
 import '../providers/theme_provider.dart';
 import '../models/note.dart';
+import '../models/notebook.dart';
 import '../widgets/note_card.dart';
 import '../widgets/search_bar.dart' as custom;
+import '../widgets/quick_action_button.dart';
+import '../widgets/help_tooltip.dart';
 import '../services/pdf_service.dart';
+import '../services/sharing_service.dart';
 import 'note_detail_screen.dart';
 import 'settings_screen.dart';
+import 'notebook_screen.dart';
+import 'humanitarian_screen.dart';
+import 'qr_scan_screen.dart';
+import 'share_options_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -17,20 +25,13 @@ class HomeScreen extends StatefulWidget {
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
-class _HomeScreenState extends State<HomeScreen>
-    with SingleTickerProviderStateMixin {
-  late AnimationController _fabAnimationController;
+class _HomeScreenState extends State<HomeScreen> {
   final Set<int> _selectedNotes = {};
   bool _isSelectionMode = false;
 
   @override
   void initState() {
     super.initState();
-    _fabAnimationController = AnimationController(
-      duration: const Duration(milliseconds: 200),
-      vsync: this,
-    );
-
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) {
         context.read<NotesProvider>().loadNotes();
@@ -38,17 +39,16 @@ class _HomeScreenState extends State<HomeScreen>
     });
   }
 
-  @override
-  void dispose() {
-    _fabAnimationController.dispose();
-    super.dispose();
-  }
-
   void _showAddNoteScreen() {
+    final notesProvider = context.read<NotesProvider>();
+    final selectedCategory = notesProvider.selectedCategory;
+
     Navigator.push(
       context,
       MaterialPageRoute(
-        builder: (_) => const NoteDetailScreen(), // note: null pour ajout
+        builder: (_) => NoteDetailScreen(
+          initialCategory: selectedCategory != 'all' ? selectedCategory : null,
+        ),
       ),
     );
   }
@@ -88,7 +88,7 @@ class _HomeScreenState extends State<HomeScreen>
       if (selectedNotes.isNotEmpty) {
         try {
           ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
+            const SnackBar(
               content: Row(
                 children: [
                   SizedBox(
@@ -100,16 +100,10 @@ class _HomeScreenState extends State<HomeScreen>
                     ),
                   ),
                   SizedBox(width: 12),
-                  Text('Export de ${selectedNotes.length} note(s) en cours...'),
+                  Text('Export en cours...'),
                 ],
               ),
               backgroundColor: Color(0xFF6366F1),
-              behavior: SnackBarBehavior.floating,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
-              ),
-              margin: EdgeInsets.all(16),
-              duration: Duration(seconds: 3),
             ),
           );
 
@@ -125,21 +119,8 @@ class _HomeScreenState extends State<HomeScreen>
           if (mounted && filePath != null) {
             ScaffoldMessenger.of(context).showSnackBar(
               SnackBar(
-                content: Row(
-                  children: [
-                    Icon(Icons.check_circle, color: Colors.white),
-                    SizedBox(width: 12),
-                    Expanded(
-                      child: Text('${selectedNotes.length} note(s) exportée(s) avec succès!'),
-                    ),
-                  ],
-                ),
-                backgroundColor: Color(0xFF10B981),
-                behavior: SnackBarBehavior.floating,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                margin: EdgeInsets.all(16),
+                content: Text('${selectedNotes.length} note(s) exportée(s)!'),
+                backgroundColor: const Color(0xFF10B981),
               ),
             );
           }
@@ -148,21 +129,8 @@ class _HomeScreenState extends State<HomeScreen>
           if (mounted) {
             ScaffoldMessenger.of(context).showSnackBar(
               SnackBar(
-                content: Row(
-                  children: [
-                    Icon(Icons.error_outline, color: Colors.white),
-                    SizedBox(width: 12),
-                    Expanded(
-                      child: Text('Erreur lors de l\'export: $e'),
-                    ),
-                  ],
-                ),
-                backgroundColor: Color(0xFFEF4444),
-                behavior: SnackBarBehavior.floating,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                margin: EdgeInsets.all(16),
+                content: Text('Erreur: $e'),
+                backgroundColor: const Color(0xFFEF4444),
               ),
             );
           }
@@ -178,7 +146,7 @@ class _HomeScreenState extends State<HomeScreen>
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         title: const Text('Confirmer la suppression'),
         content: Text(
-            'Êtes-vous sûr de vouloir supprimer ${_selectedNotes.length} note(s) ?'
+            'Supprimer ${_selectedNotes.length} note(s) ?'
         ),
         actions: [
           TextButton(
@@ -217,7 +185,6 @@ class _HomeScreenState extends State<HomeScreen>
         body: Column(
           children: [
             if (!_isSelectionMode) _buildSearchAndFilters(),
-
             Expanded(
               child: Consumer<NotesProvider>(
                 builder: (context, notesProvider, _) {
@@ -239,7 +206,7 @@ class _HomeScreenState extends State<HomeScreen>
             ),
           ],
         ),
-        floatingActionButton: _isSelectionMode ? null : _buildModernFAB(),
+        floatingActionButton: _isSelectionMode ? null : _buildFAB(),
         bottomNavigationBar: _isSelectionMode ? _buildSelectionBottomBar() : null,
       ),
     );
@@ -251,9 +218,36 @@ class _HomeScreenState extends State<HomeScreen>
         leading: IconButton(
           icon: const Icon(Icons.close),
           onPressed: _exitSelectionMode,
+          tooltip: 'Annuler la sélection',
         ),
         title: Text('${_selectedNotes.length} sélectionnée(s)'),
         actions: [
+          IconButton(
+            icon: const Icon(Icons.share),
+            onPressed: () async {
+              final notesProvider = context.read<NotesProvider>();
+              final selectedNotes = notesProvider.getSelectedNotes(_selectedNotes.toList());
+              if (selectedNotes.length == 1) {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => ShareOptionsScreen(note: selectedNotes.first),
+                  ),
+                );
+              } else {
+                await SharingService.shareNotesAsJson(selectedNotes);
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text('${selectedNotes.length} notes exportées'),
+                      backgroundColor: const Color(0xFF10B981),
+                    ),
+                  );
+                }
+              }
+            },
+            tooltip: 'Partager les notes',
+          ),
           IconButton(
             icon: const Icon(Icons.select_all),
             onPressed: () {
@@ -269,14 +263,62 @@ class _HomeScreenState extends State<HomeScreen>
                 }
               });
             },
+            tooltip: 'Tout sélectionner',
           ),
         ],
       );
     }
 
     return AppBar(
-      title: const Text('Notes'),
+      title: Consumer<NotesProvider>(
+        builder: (context, provider, _) {
+          final category = provider.selectedCategory;
+          final notebook = Notebook.getNotebookById(category);
+
+          return Row(
+            children: [
+              if (notebook != null && category != 'all') ...[
+                Text(
+                  notebook.icon,
+                  style: const TextStyle(fontSize: 24),
+                ),
+                const SizedBox(width: 8),
+              ],
+              Expanded(
+                child: Text(
+                  notebook?.name ?? 'Notes',
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ],
+          );
+        },
+      ),
       actions: [
+        IconButton(
+          icon: const Icon(Icons.qr_code_scanner, size: 26),
+          onPressed: () => Navigator.push(
+            context,
+            MaterialPageRoute(builder: (_) => const QrScanScreen()),
+          ),
+          tooltip: 'Scanner un QR Code',
+        ),
+        IconButton(
+          icon: const Text('❤️', style: TextStyle(fontSize: 22)),
+          onPressed: () => Navigator.push(
+            context,
+            MaterialPageRoute(builder: (_) => const HumanitarianTemplatesScreen()),
+          ),
+          tooltip: 'Modèles humanitaires',
+        ),
+        IconButton(
+          icon: const Icon(Icons.folder_outlined, size: 26),
+          onPressed: () => Navigator.push(
+            context,
+            MaterialPageRoute(builder: (_) => const NotebooksScreen()),
+          ),
+          tooltip: 'Mes carnets',
+        ),
         Consumer<ThemeProvider>(
           builder: (context, themeProvider, _) {
             return IconButton(
@@ -284,17 +326,20 @@ class _HomeScreenState extends State<HomeScreen>
                 themeProvider.isDarkMode
                     ? Icons.light_mode_outlined
                     : Icons.dark_mode_outlined,
+                size: 26,
               ),
               onPressed: themeProvider.toggleTheme,
+              tooltip: themeProvider.isDarkMode ? 'Mode clair' : 'Mode sombre',
             );
           },
         ),
         IconButton(
-          icon: const Icon(Icons.settings_outlined),
+          icon: const Icon(Icons.settings_outlined, size: 26),
           onPressed: () => Navigator.push(
             context,
             MaterialPageRoute(builder: (_) => const SettingsScreen()),
           ),
+          tooltip: 'Paramètres',
         ),
       ],
     );
@@ -310,9 +355,7 @@ class _HomeScreenState extends State<HomeScreen>
               context.read<NotesProvider>().searchNotes(query);
             },
           ),
-
           const SizedBox(height: 16),
-
           SingleChildScrollView(
             scrollDirection: Axis.horizontal,
             child: Row(
@@ -358,15 +401,15 @@ class _HomeScreenState extends State<HomeScreen>
         onTap: onPressed,
         borderRadius: BorderRadius.circular(20),
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(icon, size: 16),
-              const SizedBox(width: 6),
+              Icon(icon, size: 20),
+              const SizedBox(width: 8),
               Text(
                 label,
-                style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
+                style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
               ),
             ],
           ),
@@ -418,47 +461,150 @@ class _HomeScreenState extends State<HomeScreen>
   }
 
   Widget _buildEmptyState() {
-    return Center(
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(24),
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
+          const SizedBox(height: 40),
           Container(
             width: 120,
             height: 120,
             decoration: BoxDecoration(
-              color: Theme.of(context).primaryColor.withOpacity(0.1),
+              gradient: const LinearGradient(
+                colors: [Color(0xFF6366F1), Color(0xFF8B5CF6)],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+              ),
               shape: BoxShape.circle,
+              boxShadow: [
+                BoxShadow(
+                  color: const Color(0xFF6366F1).withOpacity(0.3),
+                  blurRadius: 20,
+                  offset: const Offset(0, 10),
+                ),
+              ],
             ),
-            child: Icon(
+            child: const Icon(
               Icons.note_add_outlined,
               size: 60,
-              color: Theme.of(context).primaryColor,
-            ),
-          ),
-          const SizedBox(height: 24),
-          Text(
-            'Aucune note pour le moment',
-            style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            'Créez votre première note pour commencer',
-            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-              color: Colors.grey[600],
+              color: Colors.white,
             ),
           ),
           const SizedBox(height: 32),
-          ElevatedButton.icon(
-            onPressed: _showAddNoteScreen,
-            icon: const Icon(Icons.add),
-            label: const Text('Créer une note'),
-            style: ElevatedButton.styleFrom(
-              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
+          Text(
+            'Bienvenue!',
+            style: TextStyle(
+              fontSize: 28,
+              fontWeight: FontWeight.w800,
+              color: isDark ? Colors.white : Colors.black87,
+            ),
+          ),
+          const SizedBox(height: 12),
+          Text(
+            'Commencez à créer vos notes',
+            style: TextStyle(
+              fontSize: 16,
+              color: isDark ? Colors.grey[400] : Colors.grey[600],
+            ),
+          ),
+          const SizedBox(height: 48),
+
+          GridView.count(
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            crossAxisCount: 2,
+            mainAxisSpacing: 16,
+            crossAxisSpacing: 16,
+            childAspectRatio: 0.9,
+            children: [
+              QuickActionButton(
+                icon: Icons.note_add,
+                label: 'Nouvelle note',
+                description: 'Créer une note simple',
+                color: const Color(0xFF6366F1),
+                onTap: _showAddNoteScreen,
               ),
+              QuickActionButton(
+                icon: Icons.favorite,
+                label: 'Modèles',
+                description: 'Fiches humanitaires',
+                color: const Color(0xFFEF4444),
+                onTap: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => const HumanitarianTemplatesScreen(),
+                  ),
+                ),
+              ),
+              QuickActionButton(
+                icon: Icons.qr_code_scanner,
+                label: 'Scanner',
+                description: 'Recevoir une note',
+                color: const Color(0xFF10B981),
+                onTap: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const QrScanScreen()),
+                ),
+              ),
+              QuickActionButton(
+                icon: Icons.folder,
+                label: 'Carnets',
+                description: 'Organiser vos notes',
+                color: const Color(0xFFF59E0B),
+                onTap: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const NotebooksScreen()),
+                ),
+              ),
+            ],
+          ),
+
+          const SizedBox(height: 32),
+
+          Container(
+            padding: const EdgeInsets.all(20),
+            decoration: BoxDecoration(
+              color: const Color(0xFF6366F1).withOpacity(0.1),
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(
+                color: const Color(0xFF6366F1).withOpacity(0.3),
+              ),
+            ),
+            child: Column(
+              children: [
+                Row(
+                  children: [
+                    Icon(
+                      Icons.lightbulb_outline,
+                      color: const Color(0xFF6366F1),
+                      size: 24,
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Text(
+                        'Astuce',
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w700,
+                          color: isDark ? Colors.white : Colors.black87,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  'Maintenez appuyé sur une note pour la sélectionner et accéder aux options de partage et d\'export.',
+                  style: TextStyle(
+                    fontSize: 14,
+                    color: isDark ? Colors.grey[300] : Colors.grey[700],
+                    height: 1.5,
+                  ),
+                ),
+              ],
             ),
           ),
         ],
@@ -466,20 +612,17 @@ class _HomeScreenState extends State<HomeScreen>
     );
   }
 
-  Widget _buildModernFAB() {
-    return Container(
-      margin: const EdgeInsets.only(bottom: 16, right: 4),
-      child: FloatingActionButton.extended(
-        onPressed: _showAddNoteScreen,
-        icon: const Icon(Icons.add),
-        label: const Text('Nouvelle note'),
-        backgroundColor: Theme.of(context).primaryColor,
-        foregroundColor: Colors.white,
-        elevation: 0,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(16),
-        ),
+  Widget _buildFAB() {
+    return FloatingActionButton.extended(
+      onPressed: _showAddNoteScreen,
+      icon: const Icon(Icons.add, size: 26),
+      label: const Text(
+        'Nouvelle note',
+        style: TextStyle(fontSize: 17, fontWeight: FontWeight.w600),
       ),
+      backgroundColor: const Color(0xFF6366F1),
+      foregroundColor: Colors.white,
+      elevation: 4,
     );
   }
 
@@ -493,16 +636,49 @@ class _HomeScreenState extends State<HomeScreen>
             width: 1,
           ),
         ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.05),
+            blurRadius: 10,
+            offset: const Offset(0, -2),
+          ),
+        ],
       ),
       child: SafeArea(
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
           child: Row(
             mainAxisAlignment: MainAxisAlignment.spaceEvenly,
             children: [
               _buildActionButton(
+                icon: Icons.share,
+                label: 'Partager',
+                onPressed: () async {
+                  final notesProvider = context.read<NotesProvider>();
+                  final selectedNotes = notesProvider.getSelectedNotes(_selectedNotes.toList());
+                  if (selectedNotes.length == 1) {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => ShareOptionsScreen(note: selectedNotes.first),
+                      ),
+                    );
+                  } else {
+                    await SharingService.shareNotesAsJson(selectedNotes);
+                    if (mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          content: Text('${selectedNotes.length} notes exportées'),
+                          backgroundColor: const Color(0xFF10B981),
+                        ),
+                      );
+                    }
+                  }
+                },
+              ),
+              _buildActionButton(
                 icon: Icons.picture_as_pdf_outlined,
-                label: 'Exporter',
+                label: 'PDF',
                 onPressed: _exportSelectedNotes,
               ),
               _buildActionButton(
@@ -527,21 +703,29 @@ class _HomeScreenState extends State<HomeScreen>
     return InkWell(
       onTap: onPressed,
       borderRadius: BorderRadius.circular(12),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+        decoration: BoxDecoration(
+          color: isDestructive
+              ? Colors.red.withOpacity(0.1)
+              : const Color(0xFF6366F1).withOpacity(0.1),
+          borderRadius: BorderRadius.circular(12),
+        ),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             Icon(
               icon,
-              color: isDestructive ? Colors.red : null,
+              size: 28,
+              color: isDestructive ? Colors.red : const Color(0xFF6366F1),
             ),
-            const SizedBox(height: 4),
+            const SizedBox(height: 6),
             Text(
               label,
               style: TextStyle(
-                fontSize: 12,
-                color: isDestructive ? Colors.red : null,
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+                color: isDestructive ? Colors.red : const Color(0xFF6366F1),
               ),
             ),
           ],

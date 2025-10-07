@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../models/note.dart';
 import '../services/database_service.dart';
+import '../models/notebook.dart';
 
 enum SortType { dateDesc, dateAsc, title, favorites }
 
@@ -11,8 +12,13 @@ class NotesProvider with ChangeNotifier {
   List<Note> _filteredNotes = [];
   String _searchQuery = '';
   SortType _sortType = SortType.dateDesc;
-  String _selectedCategory = 'All';
+  String _selectedCategory = 'all';
   bool _isLoading = false;
+
+  static final List<String> _validCategories = Notebook.getDefaultNotebooks()
+      .where((nb) => nb.id != 'all')
+      .map((nb) => nb.name)
+      .toList();
 
   List<Note> get notes => _filteredNotes;
   String get searchQuery => _searchQuery;
@@ -32,6 +38,7 @@ class NotesProvider with ChangeNotifier {
 
     try {
       _notes = await _db.getAllNotes();
+      _cleanInvalidCategories();
       _applyFiltersAndSort();
     } catch (e) {
       debugPrint('Erreur lors du chargement des notes: $e');
@@ -107,16 +114,18 @@ class NotesProvider with ChangeNotifier {
   void _applyFiltersAndSort() {
     var filtered = List<Note>.from(_notes);
 
+    if (_selectedCategory != 'all') {
+      filtered = filtered.where((note) =>
+      note.category.toLowerCase() == _selectedCategory.toLowerCase()
+      ).toList();
+    }
+
     if (_searchQuery.isNotEmpty) {
       filtered = filtered.where((note) {
         return note.title.toLowerCase().contains(_searchQuery.toLowerCase()) ||
             note.content.toLowerCase().contains(_searchQuery.toLowerCase()) ||
             note.tags.any((tag) => tag.toLowerCase().contains(_searchQuery.toLowerCase()));
       }).toList();
-    }
-
-    if (_selectedCategory != 'All') {
-      filtered = filtered.where((note) => note.category == _selectedCategory).toList();
     }
 
     switch (_sortType) {
@@ -143,5 +152,15 @@ class NotesProvider with ChangeNotifier {
 
   List<Note> getSelectedNotes(List<int> selectedIds) {
     return _notes.where((note) => selectedIds.contains(note.id)).toList();
+  }
+
+  void _cleanInvalidCategories() {
+    for (var i = 0; i < _notes.length; i++) {
+      if (!_validCategories.contains(_notes[i].category)) {
+        _notes[i] = _notes[i].copyWith(category: 'Général');
+        // Update in database asynchronously
+        _db.updateNote(_notes[i]);
+      }
+    }
   }
 }
