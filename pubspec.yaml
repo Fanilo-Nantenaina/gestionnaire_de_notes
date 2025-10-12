@@ -28,22 +28,33 @@ environment:
 # the latest version available on pub.dev. To see which dependencies have newer
 # versions available, run `flutter pub outdated`.
 dependencies:
+  animations:
+  crypto:
+  device_info_plus:
+  encrypt:
+  file_picker:
   flutter:
     sdk: flutter
-  provider:
-  sqflite:
-  path_provider:
-  pdf:
-  share_plus:
-  device_info_plus:
-  shared_preferences:
-  flutter_staggered_grid_view:
-  animations:
-  open_file:
+
   flutter_quill:
   flutter_quill_extensions:
+  flutter_secure_storage: ^9.0.0
+  flutter_staggered_grid_view:
+  local_auth:
+  local_auth_android:
+  local_auth_darwin:
   mobile_scanner:
+  open_file:
+  path_provider:
+  pdf:
+  permission_handler:
+  pointycastle:
+  provider:
   qr_flutter:
+  share_plus:
+  shared_preferences:
+  sqflite:
+
 
 
   # The following adds the Cupertino Icons font to your application.

@@ -1,14 +1,13 @@
 import 'package:flutter/material.dart';
+import 'package:gestionnaire_de_notes/widgets/recent_notes_widget.dart';
 import 'package:provider/provider.dart';
-import 'package:flutter_staggered_grid_view/flutter_staggered_grid_view.dart';
 import '../providers/notes_provider.dart';
 import '../providers/theme_provider.dart';
-import '../models/note.dart';
 import '../models/notebook.dart';
+import '../models/humanitarian.dart';
 import '../widgets/note_card.dart';
 import '../widgets/search_bar.dart' as custom;
 import '../widgets/quick_action_button.dart';
-import '../widgets/help_tooltip.dart';
 import '../services/pdf_service.dart';
 import '../services/sharing_service.dart';
 import 'note_detail_screen.dart';
@@ -17,6 +16,7 @@ import 'notebook_screen.dart';
 import 'humanitarian_screen.dart';
 import 'qr_scan_screen.dart';
 import 'share_options_screen.dart';
+import 'form_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -28,15 +28,32 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> {
   final Set<int> _selectedNotes = {};
   bool _isSelectionMode = false;
+  final ScrollController _scrollController = ScrollController();
 
   @override
   void initState() {
     super.initState();
+    _scrollController.addListener(_onScroll);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) {
-        context.read<NotesProvider>().loadNotes();
+        context.read<NotesProvider>().loadNotes(refresh: true);
       }
     });
+  }
+
+  @override
+  void dispose() {
+    _scrollController.removeListener(_onScroll);
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  void _onScroll() {
+    if (_scrollController.position.pixels >=
+        _scrollController.position.maxScrollExtent - 200) {
+      final notesProvider = Provider.of<NotesProvider>(context, listen: false);
+      notesProvider.loadNextPage();
+    }
   }
 
   void _showAddNoteScreen() {
@@ -171,6 +188,94 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
+  void _showBurgerMenu() {
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const SizedBox(height: 12),
+            Container(
+              width: 40,
+              height: 4,
+              decoration: BoxDecoration(
+                color: Colors.grey[300],
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            const SizedBox(height: 20),
+            ListTile(
+              leading: const Icon(Icons.qr_code_scanner, color: Color(0xFF6366F1)),
+              title: const Text('Scanner un QR Code'),
+              onTap: () {
+                Navigator.pop(context);
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const QrScanScreen()),
+                );
+              },
+            ),
+            ListTile(
+              leading: const Text('❤️', style: TextStyle(fontSize: 24)),
+              title: const Text('Modèles humanitaires'),
+              onTap: () {
+                Navigator.pop(context);
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const HumanitarianTemplatesScreen()),
+                );
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.folder_outlined, color: Color(0xFF6366F1)),
+              title: const Text('Mes carnets'),
+              onTap: () {
+                Navigator.pop(context);
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const NotebooksScreen()),
+                );
+              },
+            ),
+            Consumer<ThemeProvider>(
+              builder: (context, themeProvider, _) {
+                return ListTile(
+                  leading: Icon(
+                    themeProvider.isDarkMode
+                        ? Icons.light_mode_outlined
+                        : Icons.dark_mode_outlined,
+                    color: const Color(0xFF6366F1),
+                  ),
+                  title: Text(themeProvider.isDarkMode ? 'Mode clair' : 'Mode sombre'),
+                  onTap: () {
+                    themeProvider.toggleTheme();
+                    Navigator.pop(context);
+                  },
+                );
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.settings_outlined, color: Color(0xFF6366F1)),
+              title: const Text('Paramètres'),
+              onTap: () {
+                Navigator.pop(context);
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const SettingsScreen()),
+                );
+              },
+            ),
+            const SizedBox(height: 20),
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return PopScope(
@@ -182,29 +287,96 @@ class _HomeScreenState extends State<HomeScreen> {
       },
       child: Scaffold(
         appBar: _buildAppBar(),
-        body: Column(
-          children: [
-            if (!_isSelectionMode) _buildSearchAndFilters(),
-            Expanded(
-              child: Consumer<NotesProvider>(
-                builder: (context, notesProvider, _) {
-                  if (notesProvider.isLoading) {
-                    return const Center(
-                      child: CircularProgressIndicator(),
+        body: SafeArea(
+          child: Column(
+            children: [
+              if (!_isSelectionMode) _buildSearchAndFilters(),
+              Expanded(
+                child: Consumer<NotesProvider>(
+                  builder: (context, notesProvider, _) {
+                    if (notesProvider.isLoading && notesProvider.notes.isEmpty) {
+                      return const Center(
+                        child: CircularProgressIndicator(),
+                      );
+                    }
+
+                    final notes = notesProvider.notes;
+
+                    if (notes.isEmpty) {
+                      return _buildEmptyState();
+                    }
+
+                    return Column(
+                      children: [
+                        const RecentNotesWidget(maxNotes: 5),
+                        Expanded(
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 16),
+                            child: GridView.builder(
+                              controller: _scrollController,
+                              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                                crossAxisCount: 2,
+                                mainAxisSpacing: 12,
+                                crossAxisSpacing: 12,
+                                childAspectRatio: 0.85,
+                              ),
+                              itemCount: notes.length,
+                              itemBuilder: (context, index) {
+                                final note = notes[index];
+                                return NoteCard(
+                                  note: note,
+                                  isSelected: _selectedNotes.contains(note.id),
+                                  isSelectionMode: _isSelectionMode,
+                                  onTap: () {
+                                    if (_isSelectionMode) {
+                                      _toggleNoteSelection(note.id!);
+                                    } else {
+                                      if (note.humanitarianData != null) {
+                                        final templateId = note.humanitarianData!['templateId'] as String?;
+                                        if (templateId != null) {
+                                          final template = Humanitarian.getTemplateById(templateId);
+                                          if (template != null) {
+                                            Navigator.push(
+                                              context,
+                                              MaterialPageRoute(
+                                                builder: (_) => FormScreen(
+                                                  humanitarian: template,
+                                                  existingNote: note,
+                                                ),
+                                              ),
+                                            );
+                                            return;
+                                          }
+                                        }
+                                      }
+                                      Navigator.push(
+                                        context,
+                                        MaterialPageRoute(
+                                          builder: (_) => NoteDetailScreen(note: note),
+                                        ),
+                                      );
+                                    }
+                                  },
+                                  onLongPress: () {
+                                    if (!_isSelectionMode) {
+                                      _enterSelectionMode(note.id!);
+                                    }
+                                  },
+                                  onFavoriteToggle: () {
+                                    context.read<NotesProvider>().toggleFavorite(note.id!);
+                                  },
+                                );
+                              },
+                            ),
+                          ),
+                        ),
+                      ],
                     );
-                  }
-
-                  final notes = notesProvider.notes;
-
-                  if (notes.isEmpty) {
-                    return _buildEmptyState();
-                  }
-
-                  return _buildNotesGrid(notes);
-                },
+                  },
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
         floatingActionButton: _isSelectionMode ? null : _buildFAB(),
         bottomNavigationBar: _isSelectionMode ? _buildSelectionBottomBar() : null,
@@ -296,50 +468,9 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
       actions: [
         IconButton(
-          icon: const Icon(Icons.qr_code_scanner, size: 26),
-          onPressed: () => Navigator.push(
-            context,
-            MaterialPageRoute(builder: (_) => const QrScanScreen()),
-          ),
-          tooltip: 'Scanner un QR Code',
-        ),
-        IconButton(
-          icon: const Text('❤️', style: TextStyle(fontSize: 22)),
-          onPressed: () => Navigator.push(
-            context,
-            MaterialPageRoute(builder: (_) => const HumanitarianTemplatesScreen()),
-          ),
-          tooltip: 'Modèles humanitaires',
-        ),
-        IconButton(
-          icon: const Icon(Icons.folder_outlined, size: 26),
-          onPressed: () => Navigator.push(
-            context,
-            MaterialPageRoute(builder: (_) => const NotebooksScreen()),
-          ),
-          tooltip: 'Mes carnets',
-        ),
-        Consumer<ThemeProvider>(
-          builder: (context, themeProvider, _) {
-            return IconButton(
-              icon: Icon(
-                themeProvider.isDarkMode
-                    ? Icons.light_mode_outlined
-                    : Icons.dark_mode_outlined,
-                size: 26,
-              ),
-              onPressed: themeProvider.toggleTheme,
-              tooltip: themeProvider.isDarkMode ? 'Mode clair' : 'Mode sombre',
-            );
-          },
-        ),
-        IconButton(
-          icon: const Icon(Icons.settings_outlined, size: 26),
-          onPressed: () => Navigator.push(
-            context,
-            MaterialPageRoute(builder: (_) => const SettingsScreen()),
-          ),
-          tooltip: 'Paramètres',
+          icon: const Icon(Icons.menu),
+          onPressed: _showBurgerMenu,
+          tooltip: 'Menu',
         ),
       ],
     );
@@ -347,12 +478,12 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Widget _buildSearchAndFilters() {
     return Container(
-      padding: const EdgeInsets.fromLTRB(20, 8, 20, 16),
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
       child: Column(
         children: [
           custom.SearchBar(
             onSearchChanged: (query) {
-              context.read<NotesProvider>().searchNotes(query);
+              context.read<NotesProvider>().setSearchQuery(query);
             },
           ),
           const SizedBox(height: 16),
@@ -361,19 +492,19 @@ class _HomeScreenState extends State<HomeScreen> {
             child: Row(
               children: [
                 _buildFilterChip('Toutes', Icons.grid_view, () {
-                  context.read<NotesProvider>().setSortType(SortType.dateDesc);
+                  context.read<NotesProvider>().setSortBy('dateDesc');
                 }),
                 const SizedBox(width: 8),
                 _buildFilterChip('Favoris', Icons.star_outline, () {
-                  context.read<NotesProvider>().setSortType(SortType.favorites);
+                  context.read<NotesProvider>().setSortBy('favorites');
                 }),
                 const SizedBox(width: 8),
                 _buildFilterChip('A-Z', Icons.sort_by_alpha, () {
-                  context.read<NotesProvider>().setSortType(SortType.title);
+                  context.read<NotesProvider>().setSortBy('title');
                 }),
                 const SizedBox(width: 8),
                 _buildFilterChip('Anciennes', Icons.access_time, () {
-                  context.read<NotesProvider>().setSortType(SortType.dateAsc);
+                  context.read<NotesProvider>().setSortBy('dateAsc');
                 }),
               ],
             ),
@@ -414,48 +545,6 @@ class _HomeScreenState extends State<HomeScreen> {
             ],
           ),
         ),
-      ),
-    );
-  }
-
-  Widget _buildNotesGrid(List<Note> notes) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 20),
-      child: MasonryGridView.builder(
-        gridDelegate: const SliverSimpleGridDelegateWithFixedCrossAxisCount(
-          crossAxisCount: 2,
-        ),
-        itemCount: notes.length,
-        mainAxisSpacing: 12,
-        crossAxisSpacing: 12,
-        itemBuilder: (context, index) {
-          final note = notes[index];
-          return NoteCard(
-            note: note,
-            isSelected: _selectedNotes.contains(note.id),
-            isSelectionMode: _isSelectionMode,
-            onTap: () {
-              if (_isSelectionMode) {
-                _toggleNoteSelection(note.id!);
-              } else {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) => NoteDetailScreen(note: note),
-                  ),
-                );
-              }
-            },
-            onLongPress: () {
-              if (!_isSelectionMode) {
-                _enterSelectionMode(note.id!);
-              }
-            },
-            onFavoriteToggle: () {
-              context.read<NotesProvider>().toggleFavorite(note);
-            },
-          );
-        },
       ),
     );
   }
@@ -518,7 +607,7 @@ class _HomeScreenState extends State<HomeScreen> {
             crossAxisCount: 2,
             mainAxisSpacing: 16,
             crossAxisSpacing: 16,
-            childAspectRatio: 0.9,
+            childAspectRatio: 1.0,
             children: [
               QuickActionButton(
                 icon: Icons.note_add,
@@ -700,35 +789,38 @@ class _HomeScreenState extends State<HomeScreen> {
     required VoidCallback onPressed,
     bool isDestructive = false,
   }) {
-    return InkWell(
-      onTap: onPressed,
-      borderRadius: BorderRadius.circular(12),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-        decoration: BoxDecoration(
-          color: isDestructive
-              ? Colors.red.withOpacity(0.1)
-              : const Color(0xFF6366F1).withOpacity(0.1),
-          borderRadius: BorderRadius.circular(12),
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(
-              icon,
-              size: 28,
-              color: isDestructive ? Colors.red : const Color(0xFF6366F1),
-            ),
-            const SizedBox(height: 6),
-            Text(
-              label,
-              style: TextStyle(
-                fontSize: 13,
-                fontWeight: FontWeight.w600,
+    return Flexible(
+      child: InkWell(
+        onTap: onPressed,
+        borderRadius: BorderRadius.circular(12),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          decoration: BoxDecoration(
+            color: isDestructive
+                ? Colors.red.withOpacity(0.1)
+                : const Color(0xFF6366F1).withOpacity(0.1),
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                icon,
+                size: 28,
                 color: isDestructive ? Colors.red : const Color(0xFF6366F1),
               ),
-            ),
-          ],
+              const SizedBox(height: 6),
+              Text(
+                label,
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                  color: isDestructive ? Colors.red : const Color(0xFF6366F1),
+                ),
+                overflow: TextOverflow.ellipsis,
+              ),
+            ],
+          ),
         ),
       ),
     );

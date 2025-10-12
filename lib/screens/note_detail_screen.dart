@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../models/note.dart';
 import '../providers/notes_provider.dart';
-import '../services/pdf_service.dart';
 import 'share_options_screen.dart';
 import '../models/notebook.dart';
 
@@ -47,7 +46,6 @@ class _NoteDetailScreenState extends State<NoteDetailScreen> {
       if (_categories.contains(noteCategory)) {
         _selectedCategory = noteCategory;
       } else {
-        print('[v0] Invalid category detected: $noteCategory, using Général instead');
         _selectedCategory = 'Général';
         WidgetsBinding.instance.addPostFrameCallback((_) {
           final updatedNote = widget.note!.copyWith(category: 'Général');
@@ -168,19 +166,6 @@ class _NoteDetailScreenState extends State<NoteDetailScreen> {
       } finally {
         if (mounted) setState(() => _isLoading = false);
       }
-    }
-  }
-
-  Future<void> _exportToPdf() async {
-    if (!_isEditing) return;
-    setState(() => _isLoading = true);
-    try {
-      await PdfService.exportSingleNote(widget.note!);
-      _showSnackBar('Export réussi');
-    } catch (e) {
-      _showSnackBar('Erreur export: $e', isError: true);
-    } finally {
-      if (mounted) setState(() => _isLoading = false);
     }
   }
 

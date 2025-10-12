@@ -1,4 +1,7 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:gestionnaire_de_notes/services/backup_service.dart';
+import 'package:gestionnaire_de_notes/services/encryption_service.dart';
 import 'package:provider/provider.dart';
 import 'package:flutter/services.dart';
 import 'providers/notes_provider.dart';
@@ -12,8 +15,21 @@ import 'utils/themes.dart';
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
+  await EncryptionService().initialize();
   await SystemChrome.setPreferredOrientations([
     DeviceOrientation.portraitUp,
+  ]);
+
+  final backupService = BackupService();
+  backupService.createAutoBackup().catchError((e) {
+    if (kDebugMode) {
+      print('Erreur lors du backup automatique: $e');
+    }
+  });
+
+  SystemChrome.setPreferredOrientations([
+    DeviceOrientation.portraitUp,
+    DeviceOrientation.portraitDown,
   ]);
 
   runApp(const NotesApp());
@@ -60,16 +76,6 @@ class _AppInitializerState extends State<AppInitializer> {
   @override
   void initState() {
     super.initState();
-    _initializeApp();
-  }
-
-  Future<void> _initializeApp() async {
-    await Future.delayed(const Duration(seconds: 1));
-
-    if (mounted) {
-      final activationProvider = context.read<ActivationProvider>();
-      await activationProvider.checkActivationStatus();
-    }
   }
 
   @override

@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../providers/activation_provider.dart';
+import '../screens/home_screen.dart';
+import '../screens/activation_screen.dart';
 
 class OnboardingScreen extends StatefulWidget {
   const OnboardingScreen({super.key});
@@ -104,9 +106,9 @@ class _OnboardingScreenState extends State<OnboardingScreen>
           opacity: _fadeAnimation,
           child: SlideTransition(
             position: _slideAnimation,
-            child: Column(
+            child: Stack(
               children: [
-                Expanded(
+                Positioned.fill(
                   child: PageView.builder(
                     controller: _pageController,
                     onPageChanged: (index) {
@@ -120,7 +122,39 @@ class _OnboardingScreenState extends State<OnboardingScreen>
                     },
                   ),
                 ),
-                _buildBottomSection(isDark),
+                Positioned(
+                  left: 0,
+                  right: 0,
+                  bottom: 0,
+                  child: _buildBottomSection(isDark),
+                ),
+                Positioned(
+                  top: 50,
+                  right: 20,
+                  child: TextButton(
+                    onPressed: () async {
+                      await Provider.of<ActivationProvider>(context, listen: false)
+                          .markOnboardingAsSeen();
+
+                      if (mounted) {
+                        Navigator.pushReplacement(
+                          context,
+                          MaterialPageRoute(
+                            builder: (context) => const ActivationScreen(),
+                          ),
+                        );
+                      }
+                    },
+                    child: Text(
+                      'Passer',
+                      style: TextStyle(
+                        color: Colors.white.withOpacity(0.8),
+                        fontSize: 16,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                ),
               ],
             ),
           ),
@@ -192,6 +226,7 @@ class _OnboardingScreenState extends State<OnboardingScreen>
     return Container(
       padding: const EdgeInsets.all(32),
       child: Column(
+        mainAxisSize: MainAxisSize.min,
         children: [
           Row(
             mainAxisAlignment: MainAxisAlignment.center,
@@ -214,7 +249,6 @@ class _OnboardingScreenState extends State<OnboardingScreen>
 
           const SizedBox(height: 40),
 
-          // Boutons modernisés
           Row(
             children: [
               if (_currentPage > 0)
@@ -251,14 +285,29 @@ class _OnboardingScreenState extends State<OnboardingScreen>
               Expanded(
                 flex: _currentPage == 0 ? 1 : 1,
                 child: ElevatedButton(
-                  onPressed: () {
+                  onPressed: () async {
                     if (_currentPage < _pages.length - 1) {
                       _pageController.nextPage(
                         duration: const Duration(milliseconds: 300),
                         curve: Curves.easeInOut,
                       );
                     } else {
-                      context.read<ActivationProvider>().completeOnboarding();
+                      await Provider.of<ActivationProvider>(context, listen: false)
+                          .markOnboardingAsSeen();
+
+                      if (mounted) {
+                        final activationProvider = context.read<ActivationProvider>();
+
+                        if (activationProvider.isActivated) {
+                          Navigator.of(context).pushReplacement(
+                            MaterialPageRoute(builder: (context) => const HomeScreen()),
+                          );
+                        } else {
+                          Navigator.of(context).pushReplacement(
+                            MaterialPageRoute(builder: (context) => const ActivationScreen()),
+                          );
+                        }
+                      }
                     }
                   },
                   style: ElevatedButton.styleFrom(

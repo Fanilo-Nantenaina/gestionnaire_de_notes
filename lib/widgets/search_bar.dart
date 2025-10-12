@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 
 class SearchBar extends StatefulWidget {
@@ -7,20 +8,22 @@ class SearchBar extends StatefulWidget {
   const SearchBar({
     super.key,
     required this.onSearchChanged,
-    this.hintText = 'Rechercher dans vos notes...',
+    this.hintText = 'Rechercher...',
   });
 
   @override
-  State<SearchBar> createState() => _SearchBarrState();
+  State<SearchBar> createState() => _SearchBarState();
 }
 
-class _SearchBarrState extends State<SearchBar>
+class _SearchBarState extends State<SearchBar>
     with SingleTickerProviderStateMixin {
   final TextEditingController _controller = TextEditingController();
+  final FocusNode _focusNode = FocusNode();
   late AnimationController _animationController;
   late Animation<double> _scaleAnimation;
-  bool _isSearching = false;
-  bool _isFocused = false;
+
+  Timer? _debounce;
+  static const Duration _debounceDuration = Duration(milliseconds: 300);
 
   @override
   void initState() {
@@ -32,103 +35,82 @@ class _SearchBarrState extends State<SearchBar>
     _scaleAnimation = Tween<double>(begin: 1.0, end: 1.02).animate(
       CurvedAnimation(parent: _animationController, curve: Curves.easeInOut),
     );
+
+    _focusNode.addListener(() {
+      if (_focusNode.hasFocus) {
+        _animationController.forward();
+      } else {
+        _animationController.reverse();
+      }
+    });
+
+    _controller.addListener(_onSearchChanged);
+  }
+
+  void _onSearchChanged() {
+    if (_debounce?.isActive ?? false) _debounce!.cancel();
+    _debounce = Timer(_debounceDuration, () {
+      widget.onSearchChanged(_controller.text);
+    });
   }
 
   @override
   void dispose() {
+    _debounce?.cancel();
     _controller.dispose();
+    _focusNode.dispose();
     _animationController.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    return AnimatedBuilder(
-      animation: _scaleAnimation,
-      builder: (context, child) {
-        return Transform.scale(
-          scale: _scaleAnimation.value,
-          child: Container(
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(16),
-              boxShadow: _isFocused ? [
-                BoxShadow(
-                  color: Theme.of(context).primaryColor.withOpacity(0.1),
-                  blurRadius: 8,
-                  offset: const Offset(0, 2),
-                ),
-              ] : [],
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    return ScaleTransition(
+      scale: _scaleAnimation,
+      child: Container(
+        decoration: BoxDecoration(
+          color: isDark ? Colors.grey[850] : Colors.grey[100],
+          borderRadius: BorderRadius.circular(12),
+          boxShadow: _focusNode.hasFocus
+              ? [
+            BoxShadow(
+              color: Theme.of(context).primaryColor.withOpacity(0.3),
+              blurRadius: 8,
+              offset: const Offset(0, 2),
             ),
-            child: TextField(
-              controller: _controller,
-              onChanged: (value) {
-                widget.onSearchChanged(value);
-                setState(() {
-                  _isSearching = value.isNotEmpty;
-                });
+          ]
+              : [],
+        ),
+        child: TextField(
+          controller: _controller,
+          focusNode: _focusNode,
+          decoration: InputDecoration(
+            hintText: widget.hintText,
+            prefixIcon: Icon(
+              Icons.search,
+              color: _focusNode.hasFocus
+                  ? Theme.of(context).primaryColor
+                  : Colors.grey,
+            ),
+            suffixIcon: _controller.text.isNotEmpty
+                ? IconButton(
+              icon: const Icon(Icons.clear),
+              onPressed: () {
+                _controller.clear();
+                widget.onSearchChanged('');
               },
-              onTap: () {
-                _animationController.forward();
-                setState(() {
-                  _isFocused = true;
-                });
-              },
-              onTapOutside: (_) {
-                _animationController.reverse();
-                setState(() {
-                  _isFocused = false;
-                });
-              },
-              decoration: InputDecoration(
-                hintText: widget.hintText,
-                hintStyle: TextStyle(
-                  color: Colors.grey[500],
-                  fontSize: 16,
-                ),
-                prefixIcon: Padding(
-                  padding: const EdgeInsets.all(12),
-                  child: Icon(
-                    Icons.search,
-                    color: _isFocused || _isSearching
-                        ? Theme.of(context).primaryColor
-                        : Colors.grey[400],
-                    size: 20,
-                  ),
-                ),
-                suffixIcon: _isSearching
-                    ? IconButton(
-                  icon: Icon(
-                    Icons.clear,
-                    color: Colors.grey[400],
-                    size: 20,
-                  ),
-                  onPressed: () {
-                    _controller.clear();
-                    widget.onSearchChanged('');
-                    setState(() {
-                      _isSearching = false;
-                    });
-                  },
-                )
-                    : null,
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(16),
-                  borderSide: BorderSide.none,
-                ),
-                filled: true,
-                fillColor: Theme.of(context).brightness == Brightness.dark
-                    ? Colors.grey[850]
-                    : Colors.grey[50],
-                contentPadding: const EdgeInsets.symmetric(
-                  horizontal: 16,
-                  vertical: 16,
-                ),
-              ),
-              style: const TextStyle(fontSize: 16),
+            )
+                : null,
+            border: InputBorder.none,
+            contentPadding: const EdgeInsets.symmetric(
+              horizontal: 16,
+              vertical: 12,
             ),
           ),
-        );
-      },
+        ),
+      ),
     );
   }
 }

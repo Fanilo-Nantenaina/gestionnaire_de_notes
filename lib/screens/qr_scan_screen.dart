@@ -1,8 +1,11 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:gestionnaire_de_notes/models/note.dart';
+import 'package:gestionnaire_de_notes/utils/error_messages.dart';
+import 'package:gestionnaire_de_notes/utils/permission_handler.dart';
+import 'package:gestionnaire_de_notes/widgets/custom_snackbar.dart';
+import 'package:gestionnaire_de_notes/widgets/loading_overlay.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
-import 'package:provider/provider.dart';
-import '../services/sharing_service.dart';
-import '../providers/notes_provider.dart';
 
 class QrScanScreen extends StatefulWidget {
   const QrScanScreen({super.key});
@@ -11,59 +14,114 @@ class QrScanScreen extends StatefulWidget {
   State<QrScanScreen> createState() => _QrScanScreenState();
 }
 
-class _QrScanScreenState extends State<QrScanScreen> {
+class _QrScanScreenState extends State<QrScanScreen> with WidgetsBindingObserver {
   final MobileScannerController _controller = MobileScannerController();
   bool _isProcessing = false;
   bool _isTorchOn = false;
+  bool _permissionDenied = false;
+  bool _isCheckingPermission = true;
 
   @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _checkCameraPermission();
   }
 
-  void _onDetect(BarcodeCapture capture) async {
-    if (_isProcessing) return;
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    super.didChangeAppLifecycleState(state);
+
+    if (state == AppLifecycleState.resumed && _permissionDenied) {
+      _checkCameraPermission();
+    }
+  }
+
+  Future<void> _checkCameraPermission() async {
+    if (!mounted) return;
+
+    setState(() {
+      _isCheckingPermission = true;
+    });
+
+    final hasPermission = await PermissionHelper.requestCameraPermission(context);
+
+    if (!mounted) return;
+
+    setState(() {
+      _permissionDenied = !hasPermission;
+      _isCheckingPermission = false;
+    });
+
+    if (!hasPermission) {
+      await Future.delayed(const Duration(milliseconds: 500));
+      if (mounted) {
+        Navigator.pop(context);
+      }
+    }
+  }
+
+  Note? _parseQrCode(String code) {
+    try {
+      final Map<String, dynamic> json = jsonDecode(code);
+
+      if (!json.containsKey('id') ||
+          !json.containsKey('title') ||
+          !json.containsKey('content')) {
+        return null;
+      }
+
+      return Note.fromJson(json);
+    } catch (e) {
+      return null;
+    }
+  }
+
+  void _onDetect(BarcodeCapture capture) {
+    if (_isProcessing || _permissionDenied) return;
 
     final List<Barcode> barcodes = capture.barcodes;
     if (barcodes.isEmpty) return;
 
     final String? code = barcodes.first.rawValue;
-    if (code == null) return;
+    if (code == null || code.isEmpty) {
+      CustomSnackBar.showError(
+        context,
+        ErrorMessages.getSharingError('INVALID_QR_DATA'),
+      );
+      return;
+    }
 
     setState(() => _isProcessing = true);
 
+    LoadingOverlay.show(context, message: 'Importation en cours...');
+
     try {
-      final note = SharingService.decodeNote(code);
+      final note = _parseQrCode(code);
 
       if (note != null && mounted) {
-        await context.read<NotesProvider>().addNote(note);
-
-        if (mounted) {
-          Navigator.pop(context);
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Note reçue avec succès!'),
-              backgroundColor: Color(0xFF10B981),
-            ),
-          );
-        }
-      } else if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('QR Code invalide'),
-            backgroundColor: Color(0xFFEF4444),
-          ),
+        LoadingOverlay.hide();
+        CustomSnackBar.showSuccess(
+          context,
+          ErrorMessages.getSuccessMessage('NOTE_SHARED'),
         );
-        setState(() => _isProcessing = false);
+        Navigator.pop(context, note);
+      } else {
+        if (mounted) {
+          LoadingOverlay.hide();
+          CustomSnackBar.showError(
+            context,
+            ErrorMessages.getSharingError('INVALID_QR_DATA'),
+          );
+          setState(() => _isProcessing = false);
+        }
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Erreur: $e'),
-            backgroundColor: const Color(0xFFEF4444),
-          ),
+        LoadingOverlay.hide();
+        CustomSnackBar.showError(
+          context,
+          ErrorMessages.getSharingError('QR_SCAN_FAILED'),
         );
         setState(() => _isProcessing = false);
       }
@@ -71,8 +129,74 @@ class _QrScanScreenState extends State<QrScanScreen> {
   }
 
   @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
+    if (_isCheckingPermission) {
+      return Scaffold(
+        backgroundColor: Colors.black,
+        appBar: AppBar(
+          title: const Text('Scanner un QR Code'),
+          backgroundColor: Colors.black,
+          elevation: 0,
+        ),
+        body: const Center(
+          child: CircularProgressIndicator(
+            color: Color(0xFF6366F1),
+          ),
+        ),
+      );
+    }
+
+    if (_permissionDenied) {
+      return Scaffold(
+        backgroundColor: Colors.black,
+        appBar: AppBar(
+          title: const Text('Scanner un QR Code'),
+          backgroundColor: Colors.black,
+          elevation: 0,
+        ),
+        body: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(32),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(
+                  Icons.camera_alt_outlined,
+                  size: 80,
+                  color: Colors.grey[600],
+                ),
+                const SizedBox(height: 24),
+                Text(
+                  'Permission caméra requise',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 20,
+                    fontWeight: FontWeight.w600,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  'Veuillez autoriser l\'accès à la caméra dans les paramètres',
+                  style: TextStyle(
+                    color: Colors.grey[400],
+                    fontSize: 14,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
 
     return Scaffold(
       backgroundColor: Colors.black,
@@ -88,13 +212,11 @@ class _QrScanScreenState extends State<QrScanScreen> {
             onDetect: _onDetect,
           ),
 
-          // Overlay avec cadre de scan
           CustomPaint(
             painter: ScannerOverlay(),
             child: Container(),
           ),
 
-          // Instructions
           Positioned(
             bottom: 100,
             left: 0,
@@ -130,7 +252,6 @@ class _QrScanScreenState extends State<QrScanScreen> {
             ),
           ),
 
-          // Bouton lampe torche
           Positioned(
             bottom: 32,
             left: 0,
@@ -198,7 +319,6 @@ class ScannerOverlay extends CustomPainter {
 
     const cornerLength = 30.0;
 
-    // Coins du cadre
     canvas.drawLine(
       Offset(scanArea.left, scanArea.top),
       Offset(scanArea.left + cornerLength, scanArea.top),

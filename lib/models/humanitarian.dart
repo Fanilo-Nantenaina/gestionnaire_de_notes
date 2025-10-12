@@ -39,7 +39,6 @@ class Humanitarian {
         ],
       ),
 
-      // Fiche de besoin médical
       Humanitarian(
         id: 'medical_need',
         name: 'Besoin Médical',
@@ -63,7 +62,6 @@ class Humanitarian {
         ],
       ),
 
-      // Rapport d'aide reçue
       Humanitarian(
         id: 'aid_report',
         name: 'Rapport d\'Aide',
@@ -85,7 +83,6 @@ class Humanitarian {
         ],
       ),
 
-      // Fiche d'évaluation des besoins
       Humanitarian(
         id: 'needs_assessment',
         name: 'Évaluation des Besoins',

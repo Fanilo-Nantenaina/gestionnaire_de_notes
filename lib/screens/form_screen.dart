@@ -6,8 +6,13 @@ import '../providers/notes_provider.dart';
 
 class FormScreen extends StatefulWidget {
   final Humanitarian humanitarian;
+  final Note? existingNote;
 
-  const FormScreen({super.key, required this.humanitarian});
+  const FormScreen({
+    super.key,
+    required this.humanitarian,
+    this.existingNote,
+  });
 
   @override
   State<FormScreen> createState() => _FormScreenState();
@@ -22,15 +27,27 @@ class _FormScreenState extends State<FormScreen> {
   @override
   void initState() {
     super.initState();
+
+    if (widget.existingNote?.humanitarianData != null) {
+      final humanitarianData = widget.existingNote!.humanitarianData!;
+      if (humanitarianData.containsKey('fields')) {
+        _formValues.addAll(humanitarianData['fields'] as Map<String, dynamic>);
+      }
+    }
+
     for (final field in widget.humanitarian.fields) {
       if (field.type == FieldType.text ||
           field.type == FieldType.textarea ||
           field.type == FieldType.number ||
           field.type == FieldType.date) {
-        _controllers[field.label] = TextEditingController();
+        _controllers[field.label] = TextEditingController(
+          text: _formValues[field.label]?.toString() ?? '',
+        );
       }
       if (field.type == FieldType.multiChoice) {
-        _formValues[field.label] = <String>[];
+        _formValues[field.label] = _formValues[field.label] is List
+            ? List<String>.from(_formValues[field.label])
+            : <String>[];
       }
     }
   }
@@ -51,31 +68,50 @@ class _FormScreenState extends State<FormScreen> {
     setState(() => _isLoading = true);
 
     try {
+
       for (final entry in _controllers.entries) {
         _formValues[entry.key] = entry.value.text;
       }
 
       final content = widget.humanitarian.generateContent(_formValues);
+
       final now = DateTime.now();
 
+      final humanitarianData = {
+        'templateId': widget.humanitarian.id,
+        'templateName': widget.humanitarian.name,
+        'fields': Map<String, dynamic>.from(_formValues),
+      };
+
       final note = Note(
+        id: widget.existingNote?.id,
         title: widget.humanitarian.name,
         content: content,
-        category: 'humanitarian',
+        category: 'Humanitaire',
         tags: ['humanitaire', widget.humanitarian.id],
-        createdAt: now,
+        createdAt: widget.existingNote?.createdAt ?? now,
         updatedAt: now,
+        isFavorite: widget.existingNote?.isFavorite ?? false,
+        humanitarianData: humanitarianData,
       );
 
-      await context.read<NotesProvider>().addNote(note);
+      if (widget.existingNote != null) {
+        await context.read<NotesProvider>().updateNote(note);
+      } else {
+        await context.read<NotesProvider>().addNote(note);
+      }
 
       if (mounted) {
         Navigator.pop(context);
-        Navigator.pop(context);
+        if (widget.existingNote == null) {
+          Navigator.pop(context);
+        }
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Fiche créée avec succès'),
-            backgroundColor: Color(0xFF10B981),
+          SnackBar(
+            content: Text(widget.existingNote != null
+                ? 'Fiche modifiée avec succès'
+                : 'Fiche créée avec succès'),
+            backgroundColor: const Color(0xFF10B981),
           ),
         );
       }
@@ -100,7 +136,9 @@ class _FormScreenState extends State<FormScreen> {
     return Scaffold(
       backgroundColor: isDark ? const Color(0xFF0A0A0A) : Colors.grey[50],
       appBar: AppBar(
-        title: Text(widget.humanitarian.name),
+        title: Text(widget.existingNote != null
+            ? 'Modifier ${widget.humanitarian.name}'
+            : widget.humanitarian.name),
         backgroundColor: Colors.transparent,
         elevation: 0,
         actions: [
@@ -126,27 +164,36 @@ class _FormScreenState extends State<FormScreen> {
           padding: const EdgeInsets.all(20),
           children: [
             Container(
-              padding: const EdgeInsets.all(16),
+              padding: const EdgeInsets.all(20),
               decoration: BoxDecoration(
-                color: const Color(0xFFEF4444).withOpacity(0.1),
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(
-                  color: const Color(0xFFEF4444).withOpacity(0.3),
+                gradient: const LinearGradient(
+                  colors: [Color(0xFFEF4444), Color(0xFFDC2626)],
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
                 ),
+                borderRadius: BorderRadius.circular(20),
               ),
               child: Row(
                 children: [
-                  Text(
-                    widget.humanitarian.icon,
-                    style: const TextStyle(fontSize: 32),
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withOpacity(0.2),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Text(
+                      widget.humanitarian.icon,
+                      style: const TextStyle(fontSize: 32),
+                    ),
                   ),
-                  const SizedBox(width: 12),
+                  const SizedBox(width: 16),
                   Expanded(
                     child: Text(
                       widget.humanitarian.description,
-                      style: TextStyle(
+                      style: const TextStyle(
                         fontSize: 14,
-                        color: isDark ? Colors.grey[300] : Colors.grey[700],
+                        color: Colors.white,
+                        height: 1.5,
                       ),
                     ),
                   ),
@@ -176,15 +223,18 @@ class _FormScreenState extends State<FormScreen> {
                   valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
                 ),
               )
-                  : const Icon(Icons.save),
-              label: const Text('Enregistrer la fiche'),
+                  : const Icon(Icons.save_rounded),
+              label: Text(widget.existingNote != null
+                  ? 'Mettre à jour la fiche'
+                  : 'Enregistrer la fiche'),
               style: ElevatedButton.styleFrom(
                 backgroundColor: const Color(0xFFEF4444),
                 foregroundColor: Colors.white,
-                padding: const EdgeInsets.symmetric(vertical: 16),
+                padding: const EdgeInsets.symmetric(vertical: 18),
                 shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
+                  borderRadius: BorderRadius.circular(16),
                 ),
+                elevation: 0,
               ),
             ),
           ],
@@ -202,10 +252,28 @@ class _FormScreenState extends State<FormScreen> {
           decoration: InputDecoration(
             labelText: field.label + (field.required ? ' *' : ''),
             border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
+              borderRadius: BorderRadius.circular(16),
+              borderSide: BorderSide.none,
+            ),
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(16),
+              borderSide: BorderSide(
+                color: isDark
+                    ? Colors.white.withOpacity(0.08)
+                    : Colors.grey.withOpacity(0.2),
+                width: 1.5,
+              ),
+            ),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(16),
+              borderSide: const BorderSide(
+                color: Color(0xFFEF4444),
+                width: 2,
+              ),
             ),
             filled: true,
             fillColor: isDark ? const Color(0xFF1A1A1A) : Colors.white,
+            contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 18),
           ),
           keyboardType: field.type == FieldType.number
               ? TextInputType.number
@@ -221,11 +289,29 @@ class _FormScreenState extends State<FormScreen> {
           decoration: InputDecoration(
             labelText: field.label + (field.required ? ' *' : ''),
             border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
+              borderRadius: BorderRadius.circular(16),
+              borderSide: BorderSide.none,
+            ),
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(16),
+              borderSide: BorderSide(
+                color: isDark
+                    ? Colors.white.withOpacity(0.08)
+                    : Colors.grey.withOpacity(0.2),
+                width: 1.5,
+              ),
+            ),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(16),
+              borderSide: const BorderSide(
+                color: Color(0xFFEF4444),
+                width: 2,
+              ),
             ),
             filled: true,
             fillColor: isDark ? const Color(0xFF1A1A1A) : Colors.white,
             alignLabelWithHint: true,
+            contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 18),
           ),
           maxLines: 4,
           validator: field.required
@@ -239,11 +325,29 @@ class _FormScreenState extends State<FormScreen> {
           decoration: InputDecoration(
             labelText: field.label + (field.required ? ' *' : ''),
             border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
+              borderRadius: BorderRadius.circular(16),
+              borderSide: BorderSide.none,
+            ),
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(16),
+              borderSide: BorderSide(
+                color: isDark
+                    ? Colors.white.withOpacity(0.08)
+                    : Colors.grey.withOpacity(0.2),
+                width: 1.5,
+              ),
+            ),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(16),
+              borderSide: const BorderSide(
+                color: Color(0xFFEF4444),
+                width: 2,
+              ),
             ),
             filled: true,
             fillColor: isDark ? const Color(0xFF1A1A1A) : Colors.white,
-            suffixIcon: const Icon(Icons.calendar_today),
+            suffixIcon: const Icon(Icons.calendar_today_rounded),
+            contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 18),
           ),
           readOnly: true,
           onTap: () async {
@@ -265,13 +369,32 @@ class _FormScreenState extends State<FormScreen> {
 
       case FieldType.choice:
         return DropdownButtonFormField<String>(
+          value: _formValues[field.label],
           decoration: InputDecoration(
             labelText: field.label + (field.required ? ' *' : ''),
             border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
+              borderRadius: BorderRadius.circular(16),
+              borderSide: BorderSide.none,
+            ),
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(16),
+              borderSide: BorderSide(
+                color: isDark
+                    ? Colors.white.withOpacity(0.08)
+                    : Colors.grey.withOpacity(0.2),
+                width: 1.5,
+              ),
+            ),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(16),
+              borderSide: const BorderSide(
+                color: Color(0xFFEF4444),
+                width: 2,
+              ),
             ),
             filled: true,
             fillColor: isDark ? const Color(0xFF1A1A1A) : Colors.white,
+            contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 18),
           ),
           items: field.options?.map((option) {
             return DropdownMenuItem(
@@ -297,7 +420,7 @@ class _FormScreenState extends State<FormScreen> {
               field.label + (field.required ? ' *' : ''),
               style: TextStyle(
                 fontSize: 16,
-                fontWeight: FontWeight.w500,
+                fontWeight: FontWeight.w600,
                 color: isDark ? Colors.grey[300] : Colors.grey[700],
               ),
             ),
@@ -326,6 +449,9 @@ class _FormScreenState extends State<FormScreen> {
                   },
                   selectedColor: const Color(0xFFEF4444).withOpacity(0.2),
                   checkmarkColor: const Color(0xFFEF4444),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
                 );
               }).toList() ??
                   [],

@@ -1,166 +1,321 @@
-import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import '../models/note.dart';
-import '../services/database_service.dart';
 import '../models/notebook.dart';
-
-enum SortType { dateDesc, dateAsc, title, favorites }
+import '../services/database_service.dart';
 
 class NotesProvider with ChangeNotifier {
-  final DatabaseService _db = DatabaseService();
+  final DatabaseService _databaseService = DatabaseService.instance;
 
   List<Note> _notes = [];
-  List<Note> _filteredNotes = [];
-  String _searchQuery = '';
-  SortType _sortType = SortType.dateDesc;
-  String _selectedCategory = 'all';
   bool _isLoading = false;
+  String _searchQuery = '';
+  String _selectedCategory = 'all';
+  String _sortBy = 'date';
 
-  static final List<String> _validCategories = Notebook.getDefaultNotebooks()
-      .where((nb) => nb.id != 'all')
-      .map((nb) => nb.name)
-      .toList();
+  final Map<int, Note> _notesCache = {};
+  DateTime? _lastCacheUpdate;
+  static const _cacheDuration = Duration(minutes: 5);
 
-  List<Note> get notes => _filteredNotes;
-  String get searchQuery => _searchQuery;
-  SortType get sortType => _sortType;
-  String get selectedCategory => _selectedCategory;
+  int _currentPage = 0;
+  final int _pageSize = 20;
+  bool _hasMoreNotes = true;
+  int _totalNotesCount = 0;
+
+  List<Note> get notes => _notes;
   bool get isLoading => _isLoading;
+  String get searchQuery => _searchQuery;
+  String get selectedCategory => _selectedCategory;
+  String get sortBy => _sortBy;
+  bool get hasMoreNotes => _hasMoreNotes;
+  int get totalNotesCount => _totalNotesCount;
+  int get currentPage => _currentPage;
 
-  List<String> get categories {
-    final cats = _notes.map((note) => note.category).toSet().toList();
-    cats.sort();
-    return ['All', ...cats];
+  NotesProvider() {
+    loadNotes();
   }
 
-  Future<void> loadNotes() async {
+  String? _getCategoryNameForQuery(String categoryId) {
+    if (categoryId == 'all' || categoryId.isEmpty) {
+      return null;
+    }
+
+    final notebook = Notebook.getNotebookById(categoryId);
+    return notebook?.name;
+  }
+
+  Future<void> loadNotes({bool refresh = false}) async {
+    if (_isLoading) return;
+
+    if (refresh) {
+      _currentPage = 0;
+      _notes.clear();
+      _hasMoreNotes = true;
+    }
+
     _isLoading = true;
     notifyListeners();
 
     try {
-      _notes = await _db.getAllNotes();
-      _cleanInvalidCategories();
-      _applyFiltersAndSort();
-    } catch (e) {
-      debugPrint('Erreur lors du chargement des notes: $e');
+      final categoryName = _getCategoryNameForQuery(_selectedCategory);
+
+      _totalNotesCount = await _databaseService.getNotesCount(
+        category: categoryName,
+        searchQuery: _searchQuery.isNotEmpty ? _searchQuery : null,
+      );
+
+      final maps = await _databaseService.getNotesPaginated(
+        page: _currentPage,
+        pageSize: _pageSize,
+        category: categoryName,
+        searchQuery: _searchQuery.isNotEmpty ? _searchQuery : null,
+        orderBy: _getSortOrder(),
+      );
+
+      final newNotes = maps.map((map) => Note.fromJson(map)).toList();
+
+      if (refresh) {
+        _notes = newNotes;
+      } else {
+        _notes.addAll(newNotes);
+      }
+
+      for (final note in newNotes) {
+        if (note.id != null) {
+          _notesCache[note.id!] = note;
+        }
+      }
+      _lastCacheUpdate = DateTime.now();
+      _hasMoreNotes = _notes.length < _totalNotesCount;
+
+    } catch (e, stackTrace) {
+      if (kDebugMode) {
+        print('Error loading notes: $e');
+        print('Stack trace: $stackTrace');
+      }
+    } finally {
+      _isLoading = false;
+      notifyListeners();
+    }
+  }
+
+  Future<void> loadNextPage() async {
+    if (!_hasMoreNotes || _isLoading) return;
+
+    _currentPage++;
+    await loadNotes();
+  }
+
+  Future<Note?> getNote(int id) async {
+    if (_isCacheValid() && _notesCache.containsKey(id)) {
+      return _notesCache[id];
     }
 
-    _isLoading = false;
-    notifyListeners();
+    try {
+      final map = await _databaseService.getNoteById(id);
+      if (map != null) {
+        final note = Note.fromJson(map as Map<String, dynamic>);
+        _notesCache[id] = note;
+        _lastCacheUpdate = DateTime.now();
+        return note;
+      }
+    } catch (e) {
+      if (kDebugMode) {
+        print('[NotesProvider] Error getting note: $e');
+      }
+    }
+
+    return null;
+  }
+
+  bool _isCacheValid() {
+    if (_lastCacheUpdate == null) return false;
+    return DateTime.now().difference(_lastCacheUpdate!) < _cacheDuration;
+  }
+
+  void _invalidateCache() {
+    _notesCache.clear();
+    _lastCacheUpdate = null;
+  }
+
+  String _getSortOrder() {
+    switch (_sortBy) {
+      case 'title':
+        return 'title ASC';
+      case 'favorite':
+      case 'favorites':
+        return 'is_favorite DESC, created_at DESC';
+      case 'dateAsc':
+        return 'created_at ASC';
+      case 'date':
+      case 'dateDesc':
+      default:
+        return 'created_at DESC';
+    }
   }
 
   Future<void> addNote(Note note) async {
     try {
-      final id = await _db.insertNote(note);
+
+      final id = await _databaseService.insertNote(note.toJson());
       final newNote = note.copyWith(id: id);
+
       _notes.insert(0, newNote);
-      _applyFiltersAndSort();
+      _notesCache[id] = newNote;
+      _totalNotesCount++;
+
       notifyListeners();
-    } catch (e) {
-      debugPrint('Erreur lors de l\'ajout: $e');
+    } catch (e, stackTrace) {
+      if (kDebugMode) {
+        print('Error adding note: $e');
+        print('Stack trace: $stackTrace');
+      }
+      rethrow;
     }
   }
 
   Future<void> updateNote(Note note) async {
     try {
-      await _db.updateNote(note);
+      await _databaseService.updateNote(note.toJson());
+
       final index = _notes.indexWhere((n) => n.id == note.id);
       if (index != -1) {
         _notes[index] = note;
-        _applyFiltersAndSort();
-        notifyListeners();
       }
-    } catch (e) {
-      debugPrint('Erreur lors de la mise à jour: $e');
-    }
-  }
 
-  Future<void> deleteNote(int id) async {
-    try {
-      await _db.deleteNote(id);
-      _notes.removeWhere((note) => note.id == id);
-      _applyFiltersAndSort();
+      if (note.id != null) {
+        _notesCache[note.id!] = note;
+      }
+
       notifyListeners();
-    } catch (e) {
-      debugPrint('Erreur lors de la suppression: $e');
+    } catch (e, stackTrace) {
+      if (kDebugMode) {
+        print('Error updating note: $e');
+        print('Stack trace: $stackTrace');
+      }
+      rethrow;
     }
   }
 
-  Future<void> toggleFavorite(Note note) async {
-    final updatedNote = note.copyWith(
-      isFavorite: !note.isFavorite,
-      updatedAt: DateTime.now(),
-    );
-    await updateNote(updatedNote);
+  Future<bool> deleteNote(int id) async {
+    try {
+      await _databaseService.deleteNote(id);
+      _notes.removeWhere((note) => note.id == id);
+
+      _notesCache.remove(id);
+      _totalNotesCount--;
+
+      notifyListeners();
+      return true;
+    } catch (e) {
+      if (kDebugMode) {
+        print('Error deleting note: $e');
+      }
+      return false;
+    }
   }
 
-  void searchNotes(String query) {
-    _searchQuery = query;
-    _applyFiltersAndSort();
-    notifyListeners();
+  Future<bool> deleteMultipleNotes(List<int> ids) async {
+    try {
+      for (final id in ids) {
+        await _databaseService.deleteNote(id);
+        _notesCache.remove(id);
+      }
+
+      _notes.removeWhere((note) => ids.contains(note.id));
+      _totalNotesCount -= ids.length;
+
+      notifyListeners();
+      return true;
+    } catch (e) {
+      if (kDebugMode) {
+        print('Error deleting multiple notes: $e');
+      }
+      return false;
+    }
   }
 
-  void setSortType(SortType sortType) {
-    _sortType = sortType;
-    _applyFiltersAndSort();
-    notifyListeners();
+  void setSearchQuery(String query) {
+    if (_searchQuery != query) {
+      _searchQuery = query;
+      loadNotes(refresh: true);
+    }
   }
 
   void setCategory(String category) {
-    _selectedCategory = category;
-    _applyFiltersAndSort();
-    notifyListeners();
+    if (_selectedCategory != category) {
+      _selectedCategory = category;
+      loadNotes(refresh: true);
+    }
   }
 
-  void _applyFiltersAndSort() {
-    var filtered = List<Note>.from(_notes);
-
-    if (_selectedCategory != 'all') {
-      filtered = filtered.where((note) =>
-      note.category.toLowerCase() == _selectedCategory.toLowerCase()
-      ).toList();
+  void setSortBy(String sortBy) {
+    if (_sortBy != sortBy) {
+      _sortBy = sortBy;
+      loadNotes(refresh: true);
     }
+  }
 
-    if (_searchQuery.isNotEmpty) {
-      filtered = filtered.where((note) {
-        return note.title.toLowerCase().contains(_searchQuery.toLowerCase()) ||
-            note.content.toLowerCase().contains(_searchQuery.toLowerCase()) ||
-            note.tags.any((tag) => tag.toLowerCase().contains(_searchQuery.toLowerCase()));
-      }).toList();
+  Future<void> toggleFavorite(int id) async {
+    try {
+      final note = _notes.firstWhere((n) => n.id == id);
+      final updatedNote = note.copyWith(
+        isFavorite: !note.isFavorite,
+        updatedAt: DateTime.now(),
+      );
+
+      await updateNote(updatedNote);
+    } catch (e) {
+      if (kDebugMode) {
+        print('Error toggling favorite: $e');
+      }
     }
+  }
 
-    switch (_sortType) {
-      case SortType.dateDesc:
-        filtered.sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
-        break;
-      case SortType.dateAsc:
-        filtered.sort((a, b) => a.updatedAt.compareTo(b.updatedAt));
-        break;
-      case SortType.title:
-        filtered.sort((a, b) => a.title.toLowerCase().compareTo(b.title.toLowerCase()));
-        break;
-      case SortType.favorites:
-        filtered.sort((a, b) {
-          if (a.isFavorite && !b.isFavorite) return -1;
-          if (!a.isFavorite && b.isFavorite) return 1;
-          return b.updatedAt.compareTo(a.updatedAt);
-        });
-        break;
+  Future<void> prefetchNextPage() async {
+    if (!_hasMoreNotes || _isLoading) return;
+
+    final categoryName = _getCategoryNameForQuery(_selectedCategory);
+    final nextPage = _currentPage + 1;
+
+    final maps = await _databaseService.getNotesPaginated(
+      page: nextPage,
+      pageSize: _pageSize,
+      category: categoryName,
+      searchQuery: _searchQuery.isNotEmpty ? _searchQuery : null,
+      orderBy: _getSortOrder(),
+    );
+
+    for (final map in maps) {
+      final note = Note.fromJson(map);
+      if (note.id != null) {
+        _notesCache[note.id!] = note;
+      }
     }
+  }
 
-    _filteredNotes = filtered;
+  Future<List<Note>> getRecentNotes({int limit = 5}) async {
+    try {
+      final db = await DatabaseService.instance.database;
+      final List<Map<String, dynamic>> maps = await db.query(
+        'notes',
+        orderBy: 'updated_at DESC',
+        limit: limit,
+      );
+
+      return List.generate(maps.length, (i) => Note.fromJson(maps[i]));
+    } catch (e) {
+      debugPrint('Error getting recent notes: $e');
+      return [];
+    }
+  }
+
+  void cleanOldCache() {
+    if (!_isCacheValid()) {
+      _invalidateCache();
+    }
   }
 
   List<Note> getSelectedNotes(List<int> selectedIds) {
     return _notes.where((note) => selectedIds.contains(note.id)).toList();
-  }
-
-  void _cleanInvalidCategories() {
-    for (var i = 0; i < _notes.length; i++) {
-      if (!_validCategories.contains(_notes[i].category)) {
-        _notes[i] = _notes[i].copyWith(category: 'Général');
-        // Update in database asynchronously
-        _db.updateNote(_notes[i]);
-      }
-    }
   }
 }

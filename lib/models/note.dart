@@ -1,23 +1,72 @@
+import 'dart:convert';
+import '../services/encryption_service.dart';
+
 class Note {
   final int? id;
   final String title;
   final String content;
+  final String category;
+  final List<String> tags;
   final bool isFavorite;
+  final Map<String, dynamic>? humanitarianData;
   final DateTime createdAt;
   final DateTime updatedAt;
-  final List<String> tags;
-  final String category;
+  final bool isEncrypted;
 
   Note({
     this.id,
     required this.title,
     required this.content,
+    required this.category,
+    this.tags = const [],
     this.isFavorite = false,
+    this.humanitarianData,
     required this.createdAt,
     required this.updatedAt,
-    this.tags = const [],
-    this.category = 'General',
+    this.isEncrypted = false,
   });
+
+  Future<Note> encrypt() async {
+    if (isEncrypted) return this;
+
+    final encryptionService = EncryptionService();
+
+    return Note(
+      id: id,
+      title: encryptionService.encryptText(title),
+      content: encryptionService.encryptText(content),
+      category: category,
+      tags: tags,
+      isFavorite: isFavorite,
+      humanitarianData: humanitarianData != null
+          ? jsonDecode(encryptionService.decryptText(encryptionService.encryptText(jsonEncode(humanitarianData))))
+          : null,
+      createdAt: createdAt,
+      updatedAt: updatedAt,
+      isEncrypted: true,
+    );
+  }
+
+  Future<Note> decrypt() async {
+    if (!isEncrypted) return this;
+
+    final encryptionService = EncryptionService();
+
+    return Note(
+      id: id,
+      title: encryptionService.decryptText(title),
+      content: encryptionService.decryptText(content),
+      category: category,
+      tags: tags,
+      isFavorite: isFavorite,
+      humanitarianData: humanitarianData != null
+          ? jsonDecode(encryptionService.decryptText(jsonEncode(humanitarianData)))
+          : null,
+      createdAt: createdAt,
+      updatedAt: updatedAt,
+      isEncrypted: false,
+    );
+  }
 
   Note copyWith({
     int? id,
@@ -28,6 +77,8 @@ class Note {
     DateTime? updatedAt,
     List<String>? tags,
     String? category,
+    Map<String, dynamic>? humanitarianData,
+    bool? isEncrypted,
   }) {
     return Note(
       id: id ?? this.id,
@@ -38,34 +89,42 @@ class Note {
       updatedAt: updatedAt ?? this.updatedAt,
       tags: tags ?? this.tags,
       category: category ?? this.category,
+      humanitarianData: humanitarianData ?? this.humanitarianData,
+      isEncrypted: isEncrypted ?? this.isEncrypted,
     );
   }
 
-  Map<String, dynamic> toMap() {
+  Map<String, dynamic> toJson() {
     return {
       'id': id,
       'title': title,
       'content': content,
+      'category': category,
+      'tags': tags.join(','),
       'is_favorite': isFavorite ? 1 : 0,
+      'humanitarian_data': humanitarianData != null ? jsonEncode(humanitarianData) : null,
       'created_at': createdAt.toIso8601String(),
       'updated_at': updatedAt.toIso8601String(),
-      'tags': tags.join(','),
-      'category': category,
+      'is_encrypted': isEncrypted ? 1 : 0,
     };
   }
 
-  factory Note.fromMap(Map<String, dynamic> map) {
+  factory Note.fromJson(Map<String, dynamic> json) {
     return Note(
-      id: map['id'],
-      title: map['title'] ?? '',
-      content: map['content'] ?? '',
-      isFavorite: (map['is_favorite'] ?? 0) == 1,
-      createdAt: DateTime.parse(map['created_at']),
-      updatedAt: DateTime.parse(map['updated_at']),
-      tags: map['tags'] != null && map['tags'].isNotEmpty
-          ? map['tags'].split(',')
+      id: json['id'],
+      title: json['title'],
+      content: json['content'],
+      category: json['category'],
+      tags: json['tags'] != null && json['tags'].isNotEmpty
+          ? (json['tags'] as String).split(',')
           : [],
-      category: map['category'] ?? 'General',
+      isFavorite: json['is_favorite'] == 1,
+      humanitarianData: json['humanitarian_data'] != null
+          ? jsonDecode(json['humanitarian_data'])
+          : null,
+      createdAt: DateTime.parse(json['created_at']),
+      updatedAt: DateTime.parse(json['updated_at']),
+      isEncrypted: json['is_encrypted'] == 1,
     );
   }
 
